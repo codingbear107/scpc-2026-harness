@@ -1232,15 +1232,19 @@ class FinalHarness:
         return sorted(set(tags))
 
     def user_response(self, decision: Decision, target: str, scope: dict[str, Any]) -> str:
+        # A short, concrete description of the action taken, reflecting the decision.
+        mode = scope.get("mode", "summary")
         if decision.control == "hold":
-            return "최신 안전/동의/정책 신호 때문에 진행하지 않겠습니다."
+            return "최신 안전·동의·전제 신호를 확인한 결과 처리 전제가 유효하지 않아, 이 요청은 보류하고 진행하지 않겠습니다."
         if decision.control == "ask":
-            return "대상이나 허용 범위를 한 번 더 확인해야 합니다."
+            return "대상과 공유 범위가 아직 확정되지 않아, 실행 전에 어떤 대상에게 어느 범위로 처리할지 먼저 확인하겠습니다."
+        if decision.decision_class == "local_update" or target == "memory_store":
+            return "외부로 전달하지 않고 기기 내부 상태만 갱신하겠습니다."
         if decision.control == "amend":
-            return f"민감 정보를 제외하고 {target}(으)로 진행하겠습니다."
-        if decision.decision_class == "local_update":
-            return "외부 전달 없이 내부 상태만 갱신하겠습니다."
-        return f"{scope.get('mode', 'summary')} 범위로 {target}(으)로 진행하겠습니다."
+            return f"식별 가능한 원문·민감 세부 정보는 제외하고 요약 수준으로 {target}에 공유하겠습니다."
+        if mode == "raw":
+            return f"요청한 내용을 원문 그대로 {target}에 처리하겠습니다."
+        return f"필요한 범위를 {mode}(으)로 정리해서 {target}에 처리하겠습니다."
 
 
 def participant_task_view(task: dict[str, Any]) -> dict[str, Any]:
