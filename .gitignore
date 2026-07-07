@@ -1,0 +1,17 @@
+# Provided competition data (distributed separately)
+data/
+data.zip
+*.ipynb
+
+# Python
+__pycache__/
+*.pyc
+
+# Generated artifacts (regenerable from harness.py)
+submission.csv
+
+# Local analysis / exploration and full candidate history — NOT part of the
+# submission package. The current harness.py is the code of record; going-forward
+# versions are tracked as git commits.
+screening_diag.py
+reports/
