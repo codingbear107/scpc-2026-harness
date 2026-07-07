@@ -1175,9 +1175,23 @@ class FinalHarness:
         session["last_target"] = target
         session["last_control"] = decision.control
         session["last_decision_class"] = decision.decision_class
-        # Remember the last confirmed external channel in this session so a later turn
-        # that does not restate its own target can continue to it (session continuity).
-        if is_external_channel(target):
+        # Remember this session's confirmed external channel so a later turn that does
+        # not restate its own target can continue to it (session continuity). The
+        # resolved_target of any turn confirms the channel even when that turn only
+        # held or asked (it did not dispatch), so prefer it over just the dispatched
+        # target — a later turn's surface recipient may differ from this channel.
+        resolved_channel = None
+        rv = ctx.value("resolved_target")
+        if isinstance(rv, str) and is_external_channel(rv):
+            resolved_channel = rv
+        elif isinstance(rv, dict):
+            for key in ("target", "route", "value", "name", "recipient"):
+                if is_external_channel(rv.get(key)):
+                    resolved_channel = str(rv[key])
+                    break
+        if resolved_channel:
+            session["last_channel_target"] = resolved_channel
+        elif is_external_channel(target):
             session["last_channel_target"] = target
         self.debug_traces[str(task.get("id"))] = dict(ctx.trace)
 
