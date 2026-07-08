@@ -237,9 +237,8 @@ class TaskContext:
         return needle in self.all_text
 
     def confirmed_channel(self) -> str | None:
-        """The external channel this turn is bound to: its own resolved_target, or —
-        when a later turn does not restate it — the channel confirmed earlier in the
-        session. Lets share/route decisions stay stable across a multi-turn session."""
+        """The external channel this turn is bound to: its own resolved_target when that
+        names an external destination, else None."""
         rv = self.value("resolved_target")
         if isinstance(rv, str) and is_external_channel(rv):
             return rv
@@ -247,7 +246,7 @@ class TaskContext:
             for key in ("target", "route", "value", "name", "recipient"):
                 if is_external_channel(rv.get(key)):
                     return str(rv[key])
-        return self.session.get("last_channel_target")
+        return None
 
 
 class TaskNormalizer:
@@ -530,12 +529,8 @@ class TargetResolver:
         if isinstance(resolved, str) and resolved:
             return resolved
 
-        # No destination is stated on this turn. In a multi-turn session the operative
-        # destination is the channel confirmed earlier in the session; that confirmed
-        # channel takes precedence over a recipient named only on the current turn.
-        channel = ctx.session.get("last_channel_target")
-        if channel:
-            return str(channel)
+        # No destination is stated on this turn: take it from the focal object's own
+        # recipient/channel attributes, else fall back to the user.
         attrs = focal.get("attrs") or {}
         for key in ("recipient", "target", "channel", "app", "merchant", "attendee", "name", "owner"):
             if attrs.get(key):
@@ -1056,9 +1051,10 @@ class ScopePolicyCompiler:
         # runs through the route-binding pipeline AND its dispatch authority is
         # confirmed. While authority is still incomplete/pending (dispatch blocked),
         # nothing was bound yet, so there is no prior precondition to invalidate.
+        # Authority is matched by the structural "confirmed" stem, not an enumerated list.
         return ctx.has_record("share_boundary_update") and str(
             ctx.value("dispatch_authority_check")
-        ) in ("internal_binding_confirmed", "local_authority_confirmed")
+        ).endswith("_confirmed")
 
     def _soft_confirmation(self, ctx: TaskContext, decision: Decision) -> bool:
         if decision.control == "ask":
@@ -1108,14 +1104,6 @@ class PlanCompiler:
                 {"verb": "guard", "target": focal_id, "args": {"reason": "precondition_invalidated"}},
             ]
         if decision.decision_class == "clarify":
-            # The clarification names WHY it is needed: a changed precondition when the
-            # policy layer flagged one, otherwise an unresolved route/destination.
-            flags = set((policy or {}).get("risk_flags") or [])
-            if "precondition_changed" in flags:
-                return [
-                    {"verb": "read", "target": focal_id, "args": {"purpose": "clarify_precondition"}},
-                    {"verb": "clarify", "target": "user", "args": {"reason": "precondition_changed"}},
-                ]
             return [
                 {"verb": "read", "target": focal_id, "args": {"purpose": "route_resolution_required"}},
                 {"verb": "clarify", "target": "user", "args": {"reason": "route_resolution_required"}},
@@ -1191,23 +1179,6 @@ class FinalHarness:
         session["last_target"] = target
         session["last_control"] = decision.control
         session["last_decision_class"] = decision.decision_class
-        # Remember this session's confirmed external channel so a later turn that does
-        # not restate its destination can continue to it (session continuity). A turn's
-        # resolved_target confirms the channel even when that turn only held or asked
-        # rather than dispatching, so it is preferred over the dispatched target.
-        resolved_channel = None
-        rv = ctx.value("resolved_target")
-        if isinstance(rv, str) and is_external_channel(rv):
-            resolved_channel = rv
-        elif isinstance(rv, dict):
-            for key in ("target", "route", "value", "name", "recipient"):
-                if is_external_channel(rv.get(key)):
-                    resolved_channel = str(rv[key])
-                    break
-        if resolved_channel:
-            session["last_channel_target"] = resolved_channel
-        elif is_external_channel(target):
-            session["last_channel_target"] = target
         self.debug_traces[str(task.get("id"))] = dict(ctx.trace)
 
         return {
