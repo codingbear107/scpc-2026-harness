@@ -19,5 +19,8 @@ reports/
 # Local metamorphic robustness test tool
 metamorph_eval.py
 
+# Local compliance gate (runs before every build via build.py; not shipped)
+audit.py
+
 # Clean submission packages (build artifacts)
 submission_package_*.zip

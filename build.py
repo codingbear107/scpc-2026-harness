@@ -60,10 +60,29 @@ def main() -> None:
     parser.add_argument("--name", default="", help="Candidate name (auto if omitted).")
     parser.add_argument("--note", default="", help="Short change description for the commit/tag.")
     parser.add_argument("--no-push", action="store_true", help="Commit and tag locally without pushing.")
+    parser.add_argument("--skip-audit", action="store_true", help="Bypass the pre-build compliance gate (emergencies only).")
     args = parser.parse_args()
 
     name = args.name or next_candidate_name()
     tag = "candidate-" + name.split("_")[-1]
+
+    # 0. Pre-build compliance gate: no CSV is written if the tracked source carries
+    #    evaluation-set-analysis smell or an unaccounted-for matching phrase. The gate
+    #    lives in the local-only audit.py; if it is absent the build proceeds with a warning.
+    if not args.skip_audit:
+        try:
+            import audit  # local dev tool (not part of the submission package)
+        except ImportError:
+            print("[build] WARNING: audit.py not found; skipping compliance gate")
+        else:
+            gate = audit.run()
+            if gate:
+                print(f"[build] ABORTED by compliance gate ({len(gate)} finding(s)):")
+                for f in gate:
+                    print("  - " + f)
+                print("[build] fix the findings, or re-run with --skip-audit to override.")
+                raise SystemExit(1)
+            print("[build] compliance gate: clean")
 
     # 1. Build the screening submission with a round-trip check.
     tasks = load_jsonl(DATA / "screening_tasks.jsonl")
@@ -84,7 +103,7 @@ def main() -> None:
 
     # 3. Commit the code and tag this build (CSV/reports are gitignored; the tagged
     #    harness.py fully regenerates the CSV).
-    sh("git", "add", "harness.py", "run_dev.py", "make_submission.py", "build.py", "README.md")
+    sh("git", "add", "harness.py", "run_dev.py", "make_submission.py", "build.py", "README.md", ".gitignore")
     status = sh("git", "status", "--porcelain")
     # Keep commit/tag messages generic (a version marker + local dev score only). Any
     # design rationale belongs in a local note, never in the shared code/history.
