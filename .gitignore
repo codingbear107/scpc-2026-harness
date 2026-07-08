@@ -16,6 +16,9 @@ submission.csv
 screening_diag.py
 reports/
 
+# Internal study notes (LB trajectory, candidate history) — local-only, not shipped
+docs/
+
 # Local metamorphic robustness test tool
 metamorph_eval.py
 
