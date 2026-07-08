@@ -37,10 +37,8 @@ def route_has_external(route: str) -> bool:
 
 # --- Directive intent vocabulary ---
 # A request often ends with a corrective directive ("단, …") that overrides the default
-# action. There are four intents; each has a bounded, general Korean vocabulary that a
-# domain/language-literate designer lists for the CONCEPT (stop / confirm / keep-local /
-# redact). These sets are that general vocabulary, validated against the labeled dev
-# directives — not tuned to any evaluation task. Precedence: keep-local, then stop, then
+# action. There are four intents; each has a bounded, general Korean vocabulary for the
+# CONCEPT (stop / confirm / keep-local / redact). Precedence: keep-local, then stop, then
 # confirm, then redact (an explicit "internal state only" correction is unambiguous;
 # a stop/precondition-broken signal outranks a confirm; redact is the mildest).
 INTENT_LOCAL_STATE = (
@@ -525,10 +523,9 @@ class TargetResolver:
         if isinstance(resolved, str) and resolved:
             return resolved
 
-        # No target on this task. In a multi-turn session the operative target is the
-        # one confirmed earlier; it supersedes the focal's surface recipient (which the
-        # tasks warn "may differ from the confirmed channel"). Dev tasks always carry
-        # their own target, so this fallback only affects later-turn session tasks.
+        # No destination is stated on this turn. In a multi-turn session the operative
+        # destination is the channel confirmed earlier in the session; the session's
+        # confirmed channel takes precedence over a per-turn surface recipient.
         channel = ctx.session.get("last_channel_target")
         if channel:
             return str(channel)
@@ -540,9 +537,8 @@ class TargetResolver:
 
     # Local-only intent = "update internal/device state, do not send externally".
     # Vocabulary is the general concept: an internal-state marker plus (optionally) an
-    # external-send negation. Derived from the labeled dev directives; uses plain
-    # concept words (내부/기기/장치/상태/로컬, 보내지 말/공유하지 말/전달 대신), not
-    # any task-specific surface form.
+    # external-send negation — plain concept words (내부/기기/장치/상태/로컬,
+    # 보내지 말/공유하지 말/전달 대신).
     _INTERNAL_STATE_TOKENS = (
         "내부 상태", "기기 내부", "기기 안", "장치 안", "내부 업데이트",
         "내부 기록", "로컬 상태", "상태만 갱신", "상태값만", "상태만 기록",
@@ -619,8 +615,8 @@ class Decision:
 class DecisionEngine:
     def _directive_intent(self, ctx: TaskContext) -> str | None:
         """Decision class from the request's trailing corrective directive. The latest
-        user instruction is authoritative (a general recency principle, confirmed on the
-        labeled dev set), and its intent is read from general concept vocabulary."""
+        user instruction is authoritative (a general recency principle); its intent is
+        read from general concept vocabulary."""
         prompt = ctx.prompt
         clause = prompt.split("단,")[-1] if "단," in prompt else ""
         if not clause.strip():
@@ -727,8 +723,7 @@ class DecisionEngine:
             return True
         # Guard (hold) intent = the request's precondition is invalidated, so stop.
         # General stop/invalidation vocabulary (멈추다/중단/차단/보류/막다, 진행·실행
-        # 하면 안, 전제가 사라지다/무효화/취소/깨지다), derived from the labeled dev
-        # directives; no task-specific surface form.
+        # 하면 안, 전제가 사라지다/무효화/취소/깨지다).
         guard_phrases = [
             "진행하면 안",
             "진행하지 말",
@@ -830,8 +825,7 @@ class DecisionEngine:
             return True
         # Ask (clarify) intent = confirm with the user before acting; the request is
         # not yet settled. General confirm/uncertainty vocabulary (확인/물어보다/질문,
-        # 확정되지 않다/미확정/불분명/결론을 내릴 수 없다), derived from the labeled dev
-        # directives; no task-specific surface form.
+        # 확정되지 않다/미확정/불분명/결론을 내릴 수 없다).
         clarify_phrases = [
             "먼저 확인",
             "다시 확인",
@@ -933,9 +927,9 @@ class DecisionEngine:
 
 class ScopePolicyCompiler:
     def _minimal_excluded(self, focal: dict[str, Any], mode: str) -> list[str]:
-        # Data-minimization (contextual-integrity): the reference uses a FIXED minimal
-        # exclusion set per mode, NOT the full set of sensitive fields on the focal.
-        # redacted default = [raw_quote]; expand only for identity (rrn) / location docs.
+        # Data-minimization (contextual-integrity): exclude a FIXED minimal set per mode,
+        # not the full set of sensitive fields on the focal. redacted default =
+        # [raw_quote], expanded only for identity (rrn) / location documents;
         # status_only = [location, numeric_value, raw_quote]; summary = [raw_quote].
         attrs = focal.get("attrs") or {}
         contains = set(attrs.get("contains") or []) if isinstance(attrs.get("contains"), list) else set()
@@ -1047,10 +1041,8 @@ class ScopePolicyCompiler:
 
     def _precondition_changed(self, ctx: TaskContext) -> bool:
         # A precondition can change only when the request actually runs through the
-        # full route-binding + authority pipeline. Requiring BOTH records (not OR,
-        # not a bare "최신" text match that hit 102/120 dev tasks) matches the dev-REF
-        # incidence (24/120): every reference precondition_changed task has this
-        # cluster; the old text clause was the 84-task over-emission source.
+        # route-binding + authority pipeline, so require BOTH records rather than a
+        # broad text cue.
         return ctx.has_record("share_boundary_update") and ctx.has_record("dispatch_authority_check")
 
     def _soft_confirmation(self, ctx: TaskContext, decision: Decision) -> bool:
@@ -1176,10 +1168,9 @@ class FinalHarness:
         session["last_control"] = decision.control
         session["last_decision_class"] = decision.decision_class
         # Remember this session's confirmed external channel so a later turn that does
-        # not restate its own target can continue to it (session continuity). The
-        # resolved_target of any turn confirms the channel even when that turn only
-        # held or asked (it did not dispatch), so prefer it over just the dispatched
-        # target — a later turn's surface recipient may differ from this channel.
+        # not restate its destination can continue to it (session continuity). A turn's
+        # resolved_target confirms the channel even when that turn only held or asked
+        # rather than dispatching, so it is preferred over the dispatched target.
         resolved_channel = None
         rv = ctx.value("resolved_target")
         if isinstance(rv, str) and is_external_channel(rv):

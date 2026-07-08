@@ -86,13 +86,14 @@ def main() -> None:
     #    harness.py fully regenerates the CSV).
     sh("git", "add", "harness.py", "run_dev.py", "make_submission.py", "build.py", "README.md")
     status = sh("git", "status", "--porcelain")
-    message = f"build({name}): dev {dev:.4f}" + (f" — {args.note}" if args.note else "")
+    # Keep commit/tag messages generic (a version marker + local dev score only). Any
+    # design rationale belongs in a local note, never in the shared code/history.
+    message = f"harness {name} (dev {dev:.4f})"
     if status:
         sh("git", "commit", "-q", "-m", message)
     else:
         sh("git", "commit", "-q", "--allow-empty", "-m", message)
-    tag_msg = f"{name} | dev {dev:.4f} | {args.note}".strip(" |")
-    sh("git", "tag", "-f", tag, "-m", tag_msg)
+    sh("git", "tag", "-f", tag, "-m", f"{name} (dev {dev:.4f})")
 
     branch = sh("git", "rev-parse", "--abbrev-ref", "HEAD")
     if not args.no_push:
