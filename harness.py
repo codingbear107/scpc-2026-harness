@@ -941,15 +941,15 @@ class DecisionEngine:
 class ScopePolicyCompiler:
     def _minimal_excluded(self, focal: dict[str, Any], mode: str) -> list[str]:
         # Data-minimization (contextual-integrity): exclude a FIXED minimal set per mode,
-        # not the full set of sensitive fields on the focal. redacted default =
-        # [raw_quote], expanded only for identity (rrn) / location documents;
-        # status_only = [location, numeric_value, raw_quote]; summary = [raw_quote].
+        # not the full set of sensitive fields on the focal. Defaults are [raw_quote]
+        # (redacted/summary) and [location, numeric_value, raw_quote] (status_only),
+        # expanded only for identity documents (rrn → protect the name).
         attrs = focal.get("attrs") or {}
         contains = set(attrs.get("contains") or []) if isinstance(attrs.get("contains"), list) else set()
         if mode == "status_only":
             return ["location", "numeric_value", "raw_quote"]
         if mode == "summary":
-            return ["raw_quote"]
+            return ["name"] if "rrn" in contains else ["raw_quote"]
         if mode == "redacted":
             if "rrn" in contains:
                 return ["name", "numeric_value", "raw_quote", "rrn"]
@@ -996,10 +996,12 @@ class ScopePolicyCompiler:
                 ),
             }
         if decision.decision_class == "summary_dispatch":
+            # A plain summary dispatch already shares only a summary, so no explicit
+            # field exclusion is needed on top of it.
             return {
                 "mode": "summary",
                 "allowed_fields": ["summary"],
-                "excluded_fields": self._minimal_excluded(focal, "summary"),
+                "excluded_fields": [],
                 "requires_user_confirmation": False,
             }
         return {
