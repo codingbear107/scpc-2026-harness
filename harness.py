@@ -236,6 +236,19 @@ class TaskContext:
         needle = token.lower()
         return needle in self.all_text
 
+    def confirmed_channel(self) -> str | None:
+        """The external channel this turn is bound to: its own resolved_target, or —
+        when a later turn does not restate it — the channel confirmed earlier in the
+        session. Lets share/route decisions stay stable across a multi-turn session."""
+        rv = self.value("resolved_target")
+        if isinstance(rv, str) and is_external_channel(rv):
+            return rv
+        if isinstance(rv, dict):
+            for key in ("target", "route", "value", "name", "recipient"):
+                if is_external_channel(rv.get(key)):
+                    return str(rv[key])
+        return self.session.get("last_channel_target")
+
 
 class TaskNormalizer:
     def normalize(self, task: dict[str, Any], session: dict[str, Any]) -> TaskContext:
@@ -899,12 +912,12 @@ class DecisionEngine:
         if route_has_external(route_snapshot):
             return True
         if ctx.value("session_share_policy") == "strict":
-            target = ctx.value("resolved_target")
-            if is_external_channel(target) and any(token in ctx.all_text for token in ("요약", "공유 범위", "점검", "민감")):
+            if is_external_channel(ctx.confirmed_channel()) and any(
+                token in ctx.all_text for token in ("요약", "공유 범위", "점검", "민감")
+            ):
                 return True
         if self._sensitive_fields(focal) and ctx.value("session_share_policy") == "strict":
-            target = ctx.value("resolved_target")
-            if is_external_channel(target) or ctx.has_record("ambiguous_focal"):
+            if is_external_channel(ctx.confirmed_channel()) or ctx.has_record("ambiguous_focal"):
                 return True
         return False
 
@@ -1005,7 +1018,7 @@ class ScopePolicyCompiler:
 
         if ctx.value("session_share_policy") == "strict":
             flags.add("strict_share_policy")
-        if is_external_channel(target) or is_external_channel(ctx.value("resolved_target")):
+        if is_external_channel(target) or is_external_channel(ctx.confirmed_channel()):
             flags.add("external_share")
         if (
             decision.decision_class == "local_update"
