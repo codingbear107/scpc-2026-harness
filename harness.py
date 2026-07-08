@@ -1018,7 +1018,10 @@ class ScopePolicyCompiler:
 
         if ctx.value("session_share_policy") == "strict":
             flags.add("strict_share_policy")
-        if is_external_channel(target) or is_external_channel(ctx.confirmed_channel()):
+        # An external share only when the operation's actual target is an external
+        # channel. A directive-driven ask/hold resolves to the user, so a channel
+        # confirmed elsewhere in the session does not by itself make this a share.
+        if is_external_channel(target):
             flags.add("external_share")
         if (
             decision.decision_class == "local_update"
@@ -1053,10 +1056,13 @@ class ScopePolicyCompiler:
         }
 
     def _precondition_changed(self, ctx: TaskContext) -> bool:
-        # A precondition can change only when the request actually runs through the
-        # route-binding + authority pipeline, so require BOTH records rather than a
-        # broad text cue.
-        return ctx.has_record("share_boundary_update") and ctx.has_record("dispatch_authority_check")
+        # A precondition can change only once it was actually established: the request
+        # runs through the route-binding pipeline AND its dispatch authority is
+        # confirmed. While authority is still incomplete/pending (dispatch blocked),
+        # nothing was bound yet, so there is no prior precondition to invalidate.
+        return ctx.has_record("share_boundary_update") and str(
+            ctx.value("dispatch_authority_check")
+        ) in ("internal_binding_confirmed", "local_authority_confirmed")
 
     def _soft_confirmation(self, ctx: TaskContext, decision: Decision) -> bool:
         if decision.control == "ask":
