@@ -1106,6 +1106,7 @@ class PlanCompiler:
         target: str,
         decision: Decision,
         scope: dict[str, Any],
+        policy: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         if decision.decision_class == "guard":
             return [
@@ -1113,6 +1114,14 @@ class PlanCompiler:
                 {"verb": "guard", "target": focal_id, "args": {"reason": "precondition_invalidated"}},
             ]
         if decision.decision_class == "clarify":
+            # The clarification names WHY it is needed: a changed precondition when the
+            # policy layer flagged one, otherwise an unresolved route/destination.
+            flags = set((policy or {}).get("risk_flags") or [])
+            if "precondition_changed" in flags:
+                return [
+                    {"verb": "read", "target": focal_id, "args": {"purpose": "clarify_precondition"}},
+                    {"verb": "clarify", "target": "user", "args": {"reason": "precondition_changed"}},
+                ]
             return [
                 {"verb": "read", "target": focal_id, "args": {"purpose": "route_resolution_required"}},
                 {"verb": "clarify", "target": "user", "args": {"reason": "route_resolution_required"}},
@@ -1182,7 +1191,7 @@ class FinalHarness:
         target = self._final_target(ctx, focal, preliminary_target, decision)
         scope = self.scope_policy.build_scope(ctx, focal, decision)
         policy = self.scope_policy.build_policy(ctx, focal, target, decision)
-        plan_events = self.plan_compiler.build(ctx, focal_id, target, decision, scope)
+        plan_events = self.plan_compiler.build(ctx, focal_id, target, decision, scope, policy)
 
         session["last_focal_id"] = focal_id
         session["last_target"] = target
