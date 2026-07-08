@@ -63,7 +63,7 @@ INTENT_CONFIRM = (
 INTENT_REDACT = (
     "요약만", "요약 수준", "익명", "마스킹", "제거", "제외", "덜어", "최소 요약",
     "정제된 요약", "민감", "원문 제외", "세부값을 제외", "세부는 제외",
-    "포함하지 않", "포함하지 말", "요약 공유는 허용",
+    "포함하지 않", "포함하지 말",
 )
 
 SENSITIVE_FIELDS = {
@@ -484,25 +484,19 @@ class FocalResolver:
             attrs = obj.get("attrs") or {}
             body = text_of(attrs).lower()
             value = 0
-            for token in (
-                "표면 수신처",
-                "방금 확정",
-                "요약",
-                "같은 곳에 방금",
-                "회의 시간을",
-                "오늘 건강",
-                "정상",
-                "주의",
-            ):
-                if token.lower() in body:
+            # Prefer the freshly-confirmed / current candidate over a stale, pre-existing
+            # one, using general recency-and-confirmation vocabulary rather than any
+            # task-specific content string.
+            for token in ("방금", "최근", "확정", "현재"):
+                if token in body:
                     value += 2
             if attrs.get("request_hint"):
                 value += 3
             field_text = " ".join(flatten_strings(attrs.get("fields")) + flatten_strings(attrs.get("contains")))
             if "doctor_note" in field_text:
                 value += 1
-            for token in ("기존 외부", "지난주", "지난달", "과거"):
-                if token.lower() in body:
+            for token in ("기존", "지난", "과거", "이전"):
+                if token in body:
                     value -= 5
             return value
 
