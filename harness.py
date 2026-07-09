@@ -1233,8 +1233,11 @@ class FinalHarness:
         return sorted(set(tags))
 
     def user_response(self, decision: Decision, target: str, scope: dict[str, Any]) -> str:
-        # A short, concrete description of the action taken, reflecting the decision.
+        # A short, concrete description of the action taken, naming the operative
+        # destination, disclosure scope, and any excluded fields where relevant.
         mode = scope.get("mode", "summary")
+        excluded = scope.get("excluded_fields") or []
+        excl_txt = ", ".join(excluded)
         if decision.control == "hold":
             return "최신 안전·동의·전제 신호를 확인한 결과 처리 전제가 유효하지 않아, 이 요청은 보류하고 진행하지 않겠습니다."
         if decision.control == "ask":
@@ -1242,9 +1245,13 @@ class FinalHarness:
         if decision.decision_class == "local_update" or target == "memory_store":
             return "외부로 전달하지 않고 기기 내부 상태만 갱신하겠습니다."
         if decision.control == "amend":
+            if excl_txt:
+                return f"{excl_txt} 항목은 제외하고 요약 수준으로 {target}에 공유하겠습니다."
             return f"식별 가능한 원문·민감 세부 정보는 제외하고 요약 수준으로 {target}에 공유하겠습니다."
         if mode == "raw":
             return f"요청한 내용을 원문 그대로 {target}에 처리하겠습니다."
+        if excl_txt:
+            return f"{excl_txt} 항목을 제외한 {mode} 범위로 {target}에 처리하겠습니다."
         return f"필요한 범위를 {mode}(으)로 정리해서 {target}에 처리하겠습니다."
 
 
