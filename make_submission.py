@@ -20,7 +20,7 @@ DATA_DIR = ROOT / "data"
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate DACON submission.csv for SCPC screening tasks.")
-    parser.add_argument("--candidate", default="candidate_001", help="Harness/candidate name to store in meta.")
+    parser.add_argument("--candidate", default="scpc_deterministic_harness", help="Harness name stored in meta (stable label for reproducible output).")
     parser.add_argument("--out", default="submission.csv", help="Output CSV path.")
     parser.add_argument("--json-out", default="", help="Optional debug JSON payload path.")
     args = parser.parse_args()
