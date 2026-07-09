@@ -23,9 +23,9 @@ task-specific surface strings:
   when no directive is present, the decision follows the structured record signals.
 - **Target** — follows the decision provenance: a "keep local" decision or a memory-write
   writes to internal memory; a directive-driven confirm/stop responds to the user; a
-  record-driven confirm/stop keeps the channel the operation was headed to. Channels are
-  judged structurally (`is_external_channel`), and a multi-turn session continues to its
-  confirmed channel.
+  record-driven confirm/stop keeps the channel the operation was headed to. When no
+  destination is stated on the turn, it is taken from the focal object's own
+  recipient/channel attributes. Channels are judged structurally (`is_external_channel`).
 - **Content scope** — contextual-integrity data minimization: a fixed minimal exclusion
   set per mode.
 - **Policy** — flags are emitted only on cited structural evidence.
@@ -55,3 +55,21 @@ Cross-field invariants hold on all outputs (`amend`⇒`redacted`, `hold`⇒`none
 python run_dev.py                 # score on the 120 dev tasks
 python make_submission.py         # write submission.csv for the screening tasks
 ```
+
+## Reproducing `submission.csv`
+
+- **Python**: 3.10+ (developed and tested on CPython 3.14). No third-party packages —
+  standard library only. No external LLM/API/network calls, no pretrained artifacts.
+- **File placement**: put the provided competition data under `data/` next to the code:
+  - `data/screening_tasks.jsonl` (evaluation inputs)
+  - `data/dev_tasks.jsonl`, `data/dev_answers.json` (labeled dev set, used only by `run_dev.py`)
+- **Regenerate**: `python make_submission.py` writes `submission.csv` (a single-cell JSON
+  payload in a `submission` column, 700 answers) with a built-in round-trip check.
+- **Determinism**: the harness is fully deterministic — no randomness, sampling, or
+  time/seed dependence. All set-derived output fields are sorted, so `python
+  make_submission.py` reproduces the identical `submission.csv` byte-for-byte on any
+  machine and any `PYTHONHASHSEED`. (`meta.seed` is a fixed constant recorded for
+  provenance; it is not used to drive any sampling.)
+- The same `FinalHarness` runs unchanged on unseen tasks: it reads each task's public
+  `prompt` / `device_state` / `records` / `visible_history` / `personal_memory` and
+  produces every answer field by the general rules above.
