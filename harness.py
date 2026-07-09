@@ -35,6 +35,23 @@ def route_has_external(route: str) -> bool:
     return "external" in r
 
 
+# Authority / boundary classification by the same structural-stem principle: an authority
+# state is "confirmed" when it carries the confirmed stem, a dispatch is "blocked", and a
+# boundary is a local-update one by the matching stem — so unseen values of the same shape
+# generalize instead of being missed by an enumerated value list.
+def authority_confirmed(value: Any) -> bool:
+    return isinstance(value, str) and value.endswith("_confirmed")
+
+
+def dispatch_blocked(value: Any) -> bool:
+    return isinstance(value, str) and "blocked" in value
+
+
+def is_local_boundary(value: Any) -> bool:
+    v = str(value or "")
+    return "local" in v and "boundary" in v
+
+
 # --- Directive intent vocabulary ---
 # A request often ends with a corrective directive ("단, …") that overrides the default
 # action. There are four intents; each has a bounded, general Korean vocabulary for the
@@ -703,7 +720,7 @@ class DecisionEngine:
         )
 
     def _must_guard(self, ctx: TaskContext) -> bool:
-        if ctx.value("consent") == "revoked":
+        if "revok" in str(ctx.value("consent") or ""):
             return True
         if ctx.has_record("security_alert"):
             return True
@@ -746,7 +763,7 @@ class DecisionEngine:
             return True
         if (
             ctx.value("dispatch_authority_check") == "user_binding_pending"
-            and ctx.value("share_boundary_update") == "dispatch_blocked_until_binding"
+            and dispatch_blocked(ctx.value("share_boundary_update"))
             and "외부 공유가 아니라" not in ctx.all_text
             and "상태만 갱신" not in ctx.all_text
             and "식별 가능한 세부값을 제외" not in ctx.all_text
@@ -756,7 +773,7 @@ class DecisionEngine:
         if (
             ctx.has_record("guardrail_ladder_signal")
             and ctx.value("dispatch_authority_check") == "authority_incomplete"
-            and ctx.value("share_boundary_update") == "dispatch_blocked_until_binding"
+            and dispatch_blocked(ctx.value("share_boundary_update"))
             and "식별 가능한 세부값을 제외" not in ctx.all_text
             and "요약만 공유" not in ctx.all_text
             and "새 전제가 확정되지" not in ctx.all_text
@@ -817,9 +834,9 @@ class DecisionEngine:
         # to minimal_disclosure. Genuine ambiguity below (explicit clarify phrases,
         # calendar_conflict, …) is still checked afterward.
         if not is_redaction_directive(boundary):
-            if authority in {"user_binding_pending", "authority_incomplete"}:
+            if authority and not authority_confirmed(authority):
                 return True
-            if boundary == "dispatch_blocked_until_binding":
+            if dispatch_blocked(boundary):
                 return True
         if ctx.has_record("duration_ambiguous") and "확인" in ctx.all_text:
             return True
@@ -846,7 +863,7 @@ class DecisionEngine:
             return True
         if (
             ctx.has_record("guardrail_ladder_signal")
-            and boundary == "local_update_boundary"
+            and is_local_boundary(boundary)
             and authority == "internal_binding_confirmed"
         ):
             return True
@@ -867,11 +884,7 @@ class DecisionEngine:
     def _local_update_boundary(
         self, ctx: TaskContext, boundary: str, authority: str, route_snapshot: str
     ) -> bool:
-        if boundary == "local_update_boundary" and authority in {
-            "internal_binding_confirmed",
-            "local_authority_confirmed",
-            "",
-        }:
+        if is_local_boundary(boundary) and (authority_confirmed(authority) or authority == ""):
             return ctx.has_record("ambiguous_focal")
         if ctx.has_record("privacy_guard"):
             return True
@@ -896,16 +909,16 @@ class DecisionEngine:
             return True
         if is_redaction_directive(boundary):
             return True
-        if boundary == "local_update_boundary":
+        if is_local_boundary(boundary):
             return True
         if route_has_external(route_snapshot):
             return True
-        if ctx.value("session_share_policy") == "strict":
+        if "strict" in str(ctx.value("session_share_policy") or ""):
             if is_external_channel(ctx.confirmed_channel()) and any(
                 token in ctx.all_text for token in ("요약", "공유 범위", "점검", "민감")
             ):
                 return True
-        if self._sensitive_fields(focal) and ctx.value("session_share_policy") == "strict":
+        if self._sensitive_fields(focal) and "strict" in str(ctx.value("session_share_policy") or ""):
             if is_external_channel(ctx.confirmed_channel()) or ctx.has_record("ambiguous_focal"):
                 return True
         return False
@@ -915,7 +928,7 @@ class DecisionEngine:
         contains = set(attrs.get("contains") or []) if isinstance(attrs.get("contains"), list) else set()
         if contains - {"summary", "title", "status"}:
             return False
-        if ctx.value("session_share_policy") == "strict" and ctx.has_record("ambiguous_target"):
+        if "strict" in str(ctx.value("session_share_policy") or "") and ctx.has_record("ambiguous_target"):
             return False
         return focal.get("type") in {"message", "calendar_event", "file"}
 
@@ -1007,7 +1020,7 @@ class ScopePolicyCompiler:
         violations: set[str] = set()
         sensitive = self._excluded_fields(focal)
 
-        if ctx.value("session_share_policy") == "strict":
+        if "strict" in str(ctx.value("session_share_policy") or ""):
             flags.add("strict_share_policy")
         # An external share only when the operation's actual target is an external
         # channel. A directive-driven ask/hold resolves to the user, so a channel
@@ -1017,7 +1030,7 @@ class ScopePolicyCompiler:
         if (
             decision.decision_class == "local_update"
             or target == "memory_store"
-            or ctx.value("share_boundary_update") == "local_update_boundary"
+            or is_local_boundary(ctx.value("share_boundary_update"))
         ):
             flags.add("local_only")
         if sensitive:
@@ -1060,7 +1073,7 @@ class ScopePolicyCompiler:
         if decision.control == "ask":
             return True
         if decision.decision_class in {"raw_dispatch", "local_update"}:
-            return ctx.has_record("ambiguous_target") and ctx.value("session_share_policy") == "strict"
+            return ctx.has_record("ambiguous_target") and "strict" in str(ctx.value("session_share_policy") or "")
         return False
 
     def _excluded_fields(self, focal: dict[str, Any]) -> set[str]:
