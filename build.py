@@ -86,7 +86,9 @@ def main() -> None:
 
     # 1. Build the screening submission with a round-trip check.
     tasks = load_jsonl(DATA / "screening_tasks.jsonl")
-    payload = run_harness(tasks, FinalHarness, harness_name=name)
+    # Use a stable meta label (not the candidate name) so build.py and make_submission.py
+    # produce a byte-identical submission.csv — the version marker lives in the git tag.
+    payload = run_harness(tasks, FinalHarness, harness_name="scpc_deterministic_harness")
     expected = {str(t["id"]) for t in tasks}
     validate_payload(payload, expected)
     out = ROOT / "submission.csv"
