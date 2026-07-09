@@ -1159,23 +1159,11 @@ class FinalHarness:
         self.memory: dict[str, Any] = {}
         self.debug_traces: dict[str, dict[str, Any]] = {}
 
-    def prepare(self, tasks: list[dict[str, Any]]) -> None:
-        # Preload the persistent memory store from every write record. A recall then
-        # looks its profile up by memory_key (precise) or person, so channels come from
-        # the stored memory — not a hardcoded name→channel table.
-        self.memory.clear()
-        self.debug_traces.clear()
-        for task in tasks:
-            for record in records_of(task):
-                if record.get("type") != "persistent_memory_write":
-                    continue
-                value = record.get("value")
-                if isinstance(value, dict):
-                    for key in (value.get("memory_key"), value.get("person")):
-                        if key:
-                            self.memory[str(key)] = value
-
     def answer_task(self, task: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
+        # Fully self-contained: persistent memory is accumulated incrementally from each
+        # task's own write records as the stream is processed (update_session_memory),
+        # so a later recall reads a profile stored by an earlier task in the same run —
+        # no look-ahead over the whole task list is performed.
         ctx = self.normalizer.normalize(task, session)
         self.update_session_memory(ctx)
 
@@ -1307,10 +1295,6 @@ def run_harness(
         key=lambda t: (str(t.get("session_id", "")), int(t.get("turn_index", 0)), str(t.get("id", ""))),
     )
     harness = harness_cls()
-    prepare = getattr(harness, "prepare", None)
-    if callable(prepare):
-        prepare(ordered)
-
     sessions: dict[str, dict[str, Any]] = {}
     answers: dict[str, dict[str, Any]] = {}
     for task in ordered:
