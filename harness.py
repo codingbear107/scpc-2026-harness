@@ -993,9 +993,7 @@ class ScopePolicyCompiler:
                 "mode": "redacted",
                 "allowed_fields": ["summary"],
                 "excluded_fields": self._minimal_excluded(focal, "redacted"),
-                "requires_user_confirmation": bool(
-                    ctx.has_record("ambiguous_target") or ctx.has_record("persistent_memory_recall")
-                ),
+                "requires_user_confirmation": ctx.has_record("ambiguous_target"),
             }
         if decision.decision_class == "summary_dispatch":
             # A plain summary dispatch already shares only a summary, so no explicit
@@ -1072,6 +1070,10 @@ class ScopePolicyCompiler:
     def _soft_confirmation(self, ctx: TaskContext, decision: Decision) -> bool:
         if decision.control == "ask":
             return True
+        # An amend with an ambiguous target still needs confirmation (mirrors the scope
+        # field — both confirmation fields follow the same ambiguous-target signal).
+        if decision.decision_class == "minimal_disclosure":
+            return ctx.has_record("ambiguous_target")
         if decision.decision_class in {"raw_dispatch", "local_update"}:
             return ctx.has_record("ambiguous_target") and "strict" in str(ctx.value("session_share_policy") or "")
         return False
