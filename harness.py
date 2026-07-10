@@ -821,23 +821,24 @@ class DecisionEngine:
             return True
         if ctx.has_record("amount_changed") or ctx.has_record("merchant_verification"):
             return True
-        # When the recipient itself is ambiguous, a redaction directive is not enough to
-        # act on: we do not yet know WHO to send the redacted item to, so confirm first.
-        # This holds regardless of the dispatch-authority state (an unconfirmed authority
-        # is, if anything, a further reason to ask) — the recipient ambiguity is the
-        # operative signal, so it is not conditioned on a specific authority value.
-        if (
-            ctx.has_record("ambiguous_target")
-            and is_redaction_directive(boundary)
-            and not ctx.has_record("guardrail_ladder_signal")
-        ):
+        # Route × authority × boundary state machine. A redaction boundary only LIMITS the
+        # disclosed content; on its own it grants no dispatch authority and resolves no
+        # recipient ambiguity. So a redact-and-dispatch (amend) is valid only when the
+        # recipient is unambiguous AND the dispatch authority is confirmed — otherwise
+        # confirm first. (Guardrail-escalation tasks are handled by their own rules below.)
+        route = str(ctx.value("route_candidate_snapshot") or "")
+        guardrail = ctx.has_record("guardrail_ladder_signal")
+        if is_redaction_directive(boundary) and not guardrail:
+            if ctx.has_record("ambiguous_target") or (authority and not authority_confirmed(authority)):
+                return True
+        # An outward (external / mixed-candidate) route whose dispatch authority is not yet
+        # confirmed cannot dispatch — confirm the authority before sending.
+        if route_has_external(route) and authority and not authority_confirmed(authority) and not guardrail:
             return True
-        # A redaction boundary directive is an amend instruction (redact-and-dispatch);
-        # the incomplete authority is resolved by redacting, not by asking. So the
-        # authority/blocked catch-alls must not steal these tasks — they fall through
-        # to minimal_disclosure. Genuine ambiguity below (explicit clarify phrases,
-        # calendar_conflict, …) is still checked afterward.
-        if not is_redaction_directive(boundary):
+        # A non-redaction request with unconfirmed or blocked authority asks — EXCEPT when
+        # the route is local-only: no external dispatch is being authorized, so the operation
+        # proceeds locally (handled by _local_update_boundary) rather than pausing.
+        if not is_redaction_directive(boundary) and not route_is_local_only(route):
             if authority and not authority_confirmed(authority):
                 return True
             if dispatch_blocked(boundary):
