@@ -833,11 +833,7 @@ class DecisionEngine:
         # authority/blocked catch-alls must not steal these tasks — they fall through
         # to minimal_disclosure. Genuine ambiguity below (explicit clarify phrases,
         # calendar_conflict, …) is still checked afterward.
-        # A local-update boundary keeps the operation on-device; an on-device update does
-        # not depend on EXTERNAL dispatch authority, so an unconfirmed/blocked external
-        # authority is not itself a reason to pause and ask. These fall through to the
-        # local-update / minimal-disclosure handling rather than being held for clarify.
-        if not is_redaction_directive(boundary) and not is_local_boundary(boundary):
+        if not is_redaction_directive(boundary):
             if authority and not authority_confirmed(authority):
                 return True
             if dispatch_blocked(boundary):
