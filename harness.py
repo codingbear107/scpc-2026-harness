@@ -824,7 +824,7 @@ class DecisionEngine:
         if (
             ctx.has_record("ambiguous_target")
             and is_redaction_directive(boundary)
-            and authority == "internal_binding_confirmed"
+            and authority_confirmed(authority)
             and not ctx.has_record("guardrail_ladder_signal")
         ):
             return True
@@ -864,7 +864,7 @@ class DecisionEngine:
         if (
             ctx.has_record("guardrail_ladder_signal")
             and is_local_boundary(boundary)
-            and authority == "internal_binding_confirmed"
+            and authority_confirmed(authority)
         ):
             return True
         return False
@@ -873,7 +873,7 @@ class DecisionEngine:
         return (
             ctx.has_record("guardrail_ladder_signal")
             and is_redaction_directive(boundary)
-            and authority == "internal_binding_confirmed"
+            and authority_confirmed(authority)
         )
 
     def _summary_preferred(self, ctx: TaskContext, focal: dict[str, Any], target: str) -> bool:
