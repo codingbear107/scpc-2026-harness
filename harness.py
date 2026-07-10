@@ -821,10 +821,14 @@ class DecisionEngine:
             return True
         if ctx.has_record("amount_changed") or ctx.has_record("merchant_verification"):
             return True
+        # When the recipient itself is ambiguous, a redaction directive is not enough to
+        # act on: we do not yet know WHO to send the redacted item to, so confirm first.
+        # This holds regardless of the dispatch-authority state (an unconfirmed authority
+        # is, if anything, a further reason to ask) — the recipient ambiguity is the
+        # operative signal, so it is not conditioned on a specific authority value.
         if (
             ctx.has_record("ambiguous_target")
             and is_redaction_directive(boundary)
-            and authority_confirmed(authority)
             and not ctx.has_record("guardrail_ladder_signal")
         ):
             return True
