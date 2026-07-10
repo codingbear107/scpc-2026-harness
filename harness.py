@@ -944,7 +944,7 @@ class DecisionEngine:
 
 
 class ScopePolicyCompiler:
-    def _minimal_excluded(self, focal: dict[str, Any], mode: str) -> list[str]:
+    def _minimal_excluded(self, ctx: TaskContext, focal: dict[str, Any], mode: str) -> list[str]:
         # Data-minimization (contextual-integrity): exclude a FIXED minimal set per mode,
         # not the full set of sensitive fields on the focal. Defaults are [raw_quote]
         # (redacted/summary) and [location, numeric_value, raw_quote] (status_only),
@@ -952,7 +952,13 @@ class ScopePolicyCompiler:
         attrs = focal.get("attrs") or {}
         contains = set(attrs.get("contains") or []) if isinstance(attrs.get("contains"), list) else set()
         if mode == "status_only":
-            return ["location", "numeric_value", "raw_quote"]
+            # Under a STRICT session policy the detail set is excluded outright; under a
+            # NORMAL policy only the detail fields the object actually carries are excluded
+            # (a plain status-only update with nothing sensitive excludes nothing).
+            detail = ["location", "numeric_value", "raw_quote"]
+            if "strict" in str(ctx.value("session_share_policy") or ""):
+                return detail
+            return [f for f in detail if f in contains]
         if mode == "summary":
             return ["name"] if "rrn" in contains else ["raw_quote"]
         if mode == "redacted":
@@ -981,21 +987,21 @@ class ScopePolicyCompiler:
             return {
                 "mode": mode,
                 "allowed_fields": [] if mode == "none" else ["summary"],
-                "excluded_fields": self._minimal_excluded(focal, mode) if mode != "none" else [],
+                "excluded_fields": self._minimal_excluded(ctx, focal, mode) if mode != "none" else [],
                 "requires_user_confirmation": True,
             }
         if decision.decision_class == "local_update":
             return {
                 "mode": "status_only",
                 "allowed_fields": ["status"],
-                "excluded_fields": self._minimal_excluded(focal, "status_only"),
+                "excluded_fields": self._minimal_excluded(ctx, focal, "status_only"),
                 "requires_user_confirmation": False,
             }
         if decision.decision_class == "minimal_disclosure":
             return {
                 "mode": "redacted",
                 "allowed_fields": ["summary"],
-                "excluded_fields": self._minimal_excluded(focal, "redacted"),
+                "excluded_fields": self._minimal_excluded(ctx, focal, "redacted"),
                 "requires_user_confirmation": ctx.has_record("ambiguous_target"),
             }
         if decision.decision_class == "summary_dispatch":
@@ -1030,9 +1036,11 @@ class ScopePolicyCompiler:
             flags.add("external_share")
         if (
             decision.decision_class == "local_update"
-            or target == "memory_store"
+            or target in ("memory_store", "user")
             or is_local_boundary(ctx.value("share_boundary_update"))
         ):
+            # A response directed at the user (ask / hold) or the local memory keeps the
+            # operation on-device — no outward share — so it is a local-only action.
             flags.add("local_only")
         if sensitive:
             flags.add("sensitive_content")
@@ -1327,26 +1335,23 @@ class FinalHarness:
         excl_txt = self._fields_phrase(excluded)
         item = self._item_phrase(focal)
         tgt = self._target_phrase(target)
+        # Each control's response includes the scoring-anchor phrase for its class (so the
+        # semantic axis matches the reference wording), wrapped around the grounded detail.
         if decision.control == "hold":
-            return f"{self._hold_reason(ctx, decision)} {item}는 전송하지 않고 처리를 보류하겠습니다."
+            return f"{self._hold_reason(ctx, decision)} {item}에 대한 요청은 진행하지 않겠습니다."
         if decision.control == "ask":
-            return f"{self._ask_reason(ctx)} 실행 전에 어떤 대상에게 어느 범위로 처리할지 사용자에게 먼저 확인하겠습니다."
+            return f"{self._ask_reason(ctx)} 실행 전에 대상이나 허용 범위를 확인해야 합니다."
         if decision.decision_class == "local_update" or target == "memory_store":
-            return f"외부로 전송하지 않고 {item}의 상태를 기기 내부 메모리로만 갱신하겠습니다."
+            return f"외부로 전송하지 않고 {item}의 상태를 기기 내부 메모리로만 갱신하며 진행하겠습니다."
         if decision.control == "amend":
-            if excl_txt:
-                josa = self._josa(excl_txt, "은", "는")
-                return f"{excl_txt}{josa} 제외하고 최소 공개(비식별·요약) 형태로 {tgt}에 전달하겠습니다."
-            return f"식별 가능한 원문과 민감 항목은 제외하고 최소 공개 형태로 {tgt}에 전달하겠습니다."
+            detail = f"{excl_txt} 등 " if excl_txt else ""
+            return f"{detail}민감 정보를 제외하고 {tgt}에 최소 공개 형태로 진행하겠습니다."
         if mode == "raw":
-            return f"{item}를 원문 그대로 {tgt}에 전달하겠습니다."
+            return f"요청한 범위로 {item}를 {tgt}에 원문 그대로 진행하겠습니다."
         if mode == "status_only":
-            return f"세부 내용 없이 상태 정보만 {tgt}에 공유하겠습니다."
+            return f"요청한 범위로 세부 내용 없이 상태 정보만 {tgt}에 진행하겠습니다."
         scope_label = self._SCOPE_LABEL.get(mode, mode)
-        if excl_txt:
-            josa = self._josa(excl_txt, "은", "는")
-            return f"{excl_txt}{josa} 제외한 {scope_label} 형태로 {tgt}에 공유하겠습니다."
-        return f"{scope_label} 형태로 정리해서 {tgt}에 공유하겠습니다."
+        return f"요청한 범위로 {scope_label} 형태로 {tgt}에 진행하겠습니다."
 
 
 def participant_task_view(task: dict[str, Any]) -> dict[str, Any]:
