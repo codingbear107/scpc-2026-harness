@@ -29,6 +29,10 @@ task-specific surface strings:
 - **Content scope** — contextual-integrity data minimization: a fixed minimal exclusion
   set per mode.
 - **Policy** — flags are emitted only on cited structural evidence.
+- **User response** — a short natural-language confirmation composed **only from the
+  already-decided answer fields** (target, disclosure mode, excluded fields, and the
+  control reason). It restates the harness's own decision in plain Korean and never
+  reproduces task-specific input text.
 
 Person profiles (channels, avoid-preferences) are read from the persistent-memory store
 by `memory_key`/`person`; there is no hardcoded name→value table. Route/boundary values
