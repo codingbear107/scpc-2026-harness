@@ -870,10 +870,13 @@ class DecisionEngine:
         return False
 
     def _guardrail_raw_allowed(self, ctx: TaskContext, boundary: str, authority: str) -> bool:
+        # NOTE: kept as an exact internal-binding match on purpose. A guardrail path that
+        # OPENS raw disclosure should only do so for an internal binding confirmation; a
+        # locally-scoped confirmation is deliberately NOT widened to raw here.
         return (
             ctx.has_record("guardrail_ladder_signal")
             and is_redaction_directive(boundary)
-            and authority_confirmed(authority)
+            and authority == "internal_binding_confirmed"
         )
 
     def _summary_preferred(self, ctx: TaskContext, focal: dict[str, Any], target: str) -> bool:

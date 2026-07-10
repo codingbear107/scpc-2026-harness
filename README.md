@@ -35,8 +35,10 @@ task-specific surface strings:
   reproduces task-specific input text.
 
 Person profiles (channels, avoid-preferences) are read from the persistent-memory store
-by `memory_key`/`person`; there is no hardcoded name→value table. Route/boundary values
-are matched by structural stems, so unseen values generalize.
+by `memory_key`/`person`; there is no hardcoded name→value table. Route/boundary/authority
+values are matched by structural stems — e.g. any `*_confirmed` authority is treated as one
+"confirmed authority" family — so unseen enum values generalize rather than being missed by
+an exact string match.
 
 ## Robustness
 
