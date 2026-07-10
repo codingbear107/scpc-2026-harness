@@ -1193,7 +1193,7 @@ class FinalHarness:
             "content_scope": scope,
             "policy": policy,
             "plan_events": plan_events,
-            "user_response": self.user_response(decision, target, scope),
+            "user_response": self.user_response(ctx, focal, decision, target, scope),
             "audit_tags": self.audit_tags(ctx, decision),
             "counterfactual": "최신 target, 동의, 보안 신호, 공유 경계가 달라지면 판단이 달라질 수 있습니다.",
         }
@@ -1237,27 +1237,113 @@ class FinalHarness:
             tags.append("marker_trace")
         return sorted(set(tags))
 
-    def user_response(self, decision: Decision, target: str, scope: dict[str, Any]) -> str:
-        # A short, concrete description of the action taken, naming the operative
-        # destination, disclosure scope, and any excluded fields where relevant.
+    # Natural-language labels for the answer fields, so the response reads like a
+    # human confirmation grounded in the decided target / scope rather than a template.
+    _FIELD_LABEL = {
+        "rrn": "주민등록번호",
+        "name": "이름",
+        "raw_quote": "원문 인용",
+        "numeric_value": "수치 정보",
+        "amount": "금액",
+        "location": "위치",
+        "birthday": "생일",
+    }
+    _ITEM_LABEL = {
+        "file": "이 파일",
+        "message": "이 메시지",
+        "health_record": "이 건강 기록",
+        "personal_note": "이 개인 메모",
+        "calendar_event": "이 일정",
+        "photo": "이 사진",
+    }
+    _SCOPE_LABEL = {
+        "raw": "원문",
+        "summary": "요약본",
+        "redacted": "비식별 처리본",
+        "status_only": "상태 정보",
+        "none": "비공개",
+    }
+
+    @staticmethod
+    def _josa(word: str, with_batchim: str, without_batchim: str) -> str:
+        # Pick the correct Korean particle by whether the last syllable has a final
+        # consonant (jongseong), so the sentence reads naturally for any field label.
+        if not word:
+            return without_batchim
+        last = word[-1]
+        if "가" <= last <= "힣":
+            return with_batchim if (ord(last) - 0xAC00) % 28 else without_batchim
+        return with_batchim
+
+    def _fields_phrase(self, excluded: list[str]) -> str:
+        return ", ".join(self._FIELD_LABEL.get(f, f) for f in excluded)
+
+    def _item_phrase(self, focal: dict[str, Any]) -> str:
+        return self._ITEM_LABEL.get(str(focal.get("type") or ""), "이 항목")
+
+    def _target_phrase(self, target: str) -> str:
+        if target in ("user", ""):
+            return "사용자"
+        if target == "memory_store":
+            return "기기 내부 메모리"
+        return target
+
+    def _hold_reason(self, ctx: TaskContext, decision: Decision) -> str:
+        reason = f"{decision.reason} {ctx.records_text}".lower()
+        if "consent" in reason or "동의" in reason or "revok" in reason:
+            return "사용자 동의가 철회되어"
+        if "security" in reason or "보안" in reason or "alert" in reason:
+            return "보안 경고가 확인되어"
+        if "precondition" in reason or "전제" in reason or "invalid" in reason:
+            return "처리 전제가 무효화되어"
+        return "상위 안전·범위 신호가 우선하여"
+
+    def _ask_reason(self, ctx: TaskContext) -> str:
+        if ctx.has_record("payment_policy"):
+            return "결제 금액이 확정되지 않아"
+        auth = str(ctx.value("dispatch_authority_check") or "").lower()
+        if "incomplete" in auth or "pending" in auth:
+            return "처리 권한이 아직 확정되지 않아"
+        if ctx.has_record("ambiguous_target") or ctx.has_record("route_candidate_snapshot"):
+            return "수신 대상과 공유 범위가 확정되지 않아"
+        return "대상과 공유 범위가 확정되지 않아"
+
+    def user_response(
+        self,
+        ctx: TaskContext,
+        focal: dict[str, Any],
+        decision: Decision,
+        target: str,
+        scope: dict[str, Any],
+    ) -> str:
+        # A short, concrete confirmation of the action taken, grounded in the decided
+        # target, disclosure scope, and excluded fields (no per-task text; every value
+        # comes from the answer fields already computed above).
         mode = scope.get("mode", "summary")
         excluded = scope.get("excluded_fields") or []
-        excl_txt = ", ".join(excluded)
+        excl_txt = self._fields_phrase(excluded)
+        item = self._item_phrase(focal)
+        tgt = self._target_phrase(target)
         if decision.control == "hold":
-            return "최신 안전·동의·전제 신호를 확인한 결과 처리 전제가 유효하지 않아, 이 요청은 보류하고 진행하지 않겠습니다."
+            return f"{self._hold_reason(ctx, decision)} {item}는 전송하지 않고 처리를 보류하겠습니다."
         if decision.control == "ask":
-            return "대상과 공유 범위가 아직 확정되지 않아, 실행 전에 어떤 대상에게 어느 범위로 처리할지 먼저 확인하겠습니다."
+            return f"{self._ask_reason(ctx)} 실행 전에 어떤 대상에게 어느 범위로 처리할지 사용자에게 먼저 확인하겠습니다."
         if decision.decision_class == "local_update" or target == "memory_store":
-            return "외부로 전달하지 않고 기기 내부 상태만 갱신하겠습니다."
+            return f"외부로 전송하지 않고 {item}의 상태를 기기 내부 메모리로만 갱신하겠습니다."
         if decision.control == "amend":
             if excl_txt:
-                return f"{excl_txt} 항목은 제외하고 요약 수준으로 {target}에 공유하겠습니다."
-            return f"식별 가능한 원문·민감 세부 정보는 제외하고 요약 수준으로 {target}에 공유하겠습니다."
+                josa = self._josa(excl_txt, "은", "는")
+                return f"{excl_txt}{josa} 제외하고 최소 공개(비식별·요약) 형태로 {tgt}에 전달하겠습니다."
+            return f"식별 가능한 원문과 민감 항목은 제외하고 최소 공개 형태로 {tgt}에 전달하겠습니다."
         if mode == "raw":
-            return f"요청한 내용을 원문 그대로 {target}에 처리하겠습니다."
+            return f"{item}를 원문 그대로 {tgt}에 전달하겠습니다."
+        if mode == "status_only":
+            return f"세부 내용 없이 상태 정보만 {tgt}에 공유하겠습니다."
+        scope_label = self._SCOPE_LABEL.get(mode, mode)
         if excl_txt:
-            return f"{excl_txt} 항목을 제외한 {mode} 범위로 {target}에 처리하겠습니다."
-        return f"필요한 범위를 {mode}(으)로 정리해서 {target}에 처리하겠습니다."
+            josa = self._josa(excl_txt, "은", "는")
+            return f"{excl_txt}{josa} 제외한 {scope_label} 형태로 {tgt}에 공유하겠습니다."
+        return f"{scope_label} 형태로 정리해서 {tgt}에 공유하겠습니다."
 
 
 def participant_task_view(task: dict[str, Any]) -> dict[str, Any]:
