@@ -43,6 +43,14 @@ def authority_confirmed(value: Any) -> bool:
     return isinstance(value, str) and value.endswith("_confirmed")
 
 
+def full_dispatch_confirmed(value: Any) -> bool:
+    # A confirmation that authorizes an OUTWARD (external) dispatch: it carries a dispatch
+    # BINDING, not merely a local authority. A locally-scoped confirmation ("*_local_*"
+    # style) confirms on-device handling only and does NOT green-light external transmission,
+    # so it is excluded here. Matched by structural stem so unseen binding values generalize.
+    return isinstance(value, str) and "binding" in value and value.endswith("_confirmed")
+
+
 def dispatch_blocked(value: Any) -> bool:
     return isinstance(value, str) and "blocked" in value
 
@@ -832,10 +840,11 @@ class DecisionEngine:
         if is_redaction_directive(boundary) and ctx.has_record("ambiguous_target") and not guardrail:
             return True
         # (4b/2) An OUTWARD dispatch — a redaction directive or an external-candidate route —
-        #        whose dispatch authority is not confirmed cannot proceed: redaction limits
-        #        content but grants no authority. This holds regardless of the guardrail
-        #        signal (an unconfirmed authority is not resolved by escalation).
-        if (is_redaction_directive(boundary) or route_has_external(route)) and authority and not authority_confirmed(authority):
+        #        requires a FULL dispatch (binding) authority. A redaction limits content but
+        #        grants no authority, and a merely LOCAL authority confirmation does not
+        #        authorize external transmission. If full dispatch authority is absent, ask.
+        #        Holds regardless of the guardrail signal (escalation does not confer it).
+        if (is_redaction_directive(boundary) or route_has_external(route)) and authority and not full_dispatch_confirmed(authority):
             return True
         # (1) A non-redaction, non-outward request asks on unconfirmed / blocked authority
         #     EXCEPT for a genuine local action — a local-only route AND a local-update
