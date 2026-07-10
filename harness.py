@@ -1090,15 +1090,9 @@ class ScopePolicyCompiler:
         return bool(self._excluded_fields(focal) & {"rrn", "raw_quote", "numeric_value", "doctor_note", "card_number"})
 
     def _raw_allowed_fields(self, focal: dict[str, Any]) -> list[str]:
-        attrs = focal.get("attrs") or {}
-        allowed = [field for field in ("summary", "title", "status") if field in set(attrs.get("contains") or [])]
-        if attrs.get("title") and "title" not in allowed:
-            allowed.append("title")
-        if not allowed and focal.get("type") == "calendar_event":
-            allowed = ["summary", "title"]
-        if not allowed:
-            allowed = ["summary"]
-        return allowed
+        # A raw dispatch discloses the item's summary and title (fixed per-mode allow set,
+        # matching the other modes' fixed allow lists — redacted→summary, status_only→status).
+        return ["summary", "title"]
 
 
 class PlanCompiler:
@@ -1117,6 +1111,14 @@ class PlanCompiler:
                 {"verb": "guard", "target": focal_id, "args": {"reason": "precondition_invalidated"}},
             ]
         if decision.decision_class == "clarify":
+            # The clarification's stated reason follows the policy layer: if a precondition
+            # was flagged as changed, say so; otherwise it is an unresolved route/destination.
+            # (Cross-layer consistency — the plan args match the policy flag, dev-validated.)
+            if "precondition_changed" in set((policy or {}).get("risk_flags") or []):
+                return [
+                    {"verb": "read", "target": focal_id, "args": {"purpose": "clarify_precondition"}},
+                    {"verb": "clarify", "target": "user", "args": {"reason": "precondition_changed"}},
+                ]
             return [
                 {"verb": "read", "target": focal_id, "args": {"purpose": "route_resolution_required"}},
                 {"verb": "clarify", "target": "user", "args": {"reason": "route_resolution_required"}},

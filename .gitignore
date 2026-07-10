@@ -27,3 +27,8 @@ audit.py
 
 # Clean submission packages (build artifacts)
 submission_package_*.zip
+
+# Local leaderboard monitor (not shipped)
+check_lb.py
+.lb_cache.html
+.lb_log.jsonl
