@@ -64,7 +64,10 @@ def main() -> None:
     args = parser.parse_args()
 
     name = args.name or next_candidate_name()
-    tag = "candidate-" + name.split("_")[-1]
+    # Full-name tag (underscores → hyphens) so multi-word names keep a unique, ordered
+    # tag instead of collapsing to their last token (e.g. candidate_041_enum_fsm →
+    # candidate-041-enum-fsm, not candidate-fsm).
+    tag = name.replace("_", "-")
 
     # 0. Pre-build compliance gate: no CSV is written if the tracked source carries
     #    evaluation-set-analysis smell or an unaccounted-for matching phrase. The gate

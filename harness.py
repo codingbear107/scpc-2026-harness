@@ -824,25 +824,29 @@ class DecisionEngine:
         # Route × authority × boundary state machine. A redaction boundary only LIMITS the
         # disclosed content; on its own it grants no dispatch authority and resolves no
         # recipient ambiguity. So a redact-and-dispatch (amend) is valid only when the
-        # recipient is unambiguous AND the dispatch authority is confirmed — otherwise
-        # confirm first. (Guardrail-escalation tasks are handled by their own rules below.)
+        # recipient is unambiguous AND the dispatch authority is confirmed — otherwise ask.
         route = str(ctx.value("route_candidate_snapshot") or "")
         guardrail = ctx.has_record("guardrail_ladder_signal")
-        if is_redaction_directive(boundary) and not guardrail:
-            if ctx.has_record("ambiguous_target") or (authority and not authority_confirmed(authority)):
-                return True
-        # An outward (external / mixed-candidate) route whose dispatch authority is not yet
-        # confirmed cannot dispatch — confirm the authority before sending.
-        if route_has_external(route) and authority and not authority_confirmed(authority) and not guardrail:
+        # (4a) Recipient ambiguity under a redaction directive → confirm the recipient.
+        #      Guardrail escalations are resolved by their own rule below, so excluded here.
+        if is_redaction_directive(boundary) and ctx.has_record("ambiguous_target") and not guardrail:
             return True
-        # A non-redaction request with unconfirmed or blocked authority asks — EXCEPT when
-        # the route is local-only: no external dispatch is being authorized, so the operation
-        # proceeds locally (handled by _local_update_boundary) rather than pausing.
-        if not is_redaction_directive(boundary) and not route_is_local_only(route):
-            if authority and not authority_confirmed(authority):
-                return True
-            if dispatch_blocked(boundary):
-                return True
+        # (4b/2) An OUTWARD dispatch — a redaction directive or an external-candidate route —
+        #        whose dispatch authority is not confirmed cannot proceed: redaction limits
+        #        content but grants no authority. This holds regardless of the guardrail
+        #        signal (an unconfirmed authority is not resolved by escalation).
+        if (is_redaction_directive(boundary) or route_has_external(route)) and authority and not authority_confirmed(authority):
+            return True
+        # (1) A non-redaction, non-outward request asks on unconfirmed / blocked authority
+        #     EXCEPT for a genuine local action — a local-only route AND a local-update
+        #     boundary — where no external dispatch is authorized, so it proceeds locally.
+        if not is_redaction_directive(boundary) and not route_has_external(route):
+            local_action = route_is_local_only(route) and is_local_boundary(boundary)
+            if not local_action:
+                if authority and not authority_confirmed(authority):
+                    return True
+                if dispatch_blocked(boundary):
+                    return True
         if ctx.has_record("duration_ambiguous") and "확인" in ctx.all_text:
             return True
         if ctx.has_record("calendar_conflict"):
@@ -898,7 +902,10 @@ class DecisionEngine:
             return True
         if ctx.has_record("trusted_subscription") and "refund" in str(ctx.value("payment_policy")).lower():
             return True
-        if route_is_local_only(route_snapshot):
+        # A local-only candidate set updates locally ONLY under a local-update boundary. A
+        # blocked/redaction boundary is more restrictive than a local update, so it must not
+        # collapse to the same proceed — those fall through to the clarify/amend rules.
+        if route_is_local_only(route_snapshot) and is_local_boundary(boundary):
             return True
         return False
 
