@@ -682,6 +682,18 @@ class DecisionEngine:
         if self._must_guard(ctx):
             return self._decision(ctx, "guard", "hold", "precondition_invalidated")
 
+        # Route epoch: a candidate set that arrives AFTER the prior authority (the
+        # "*_after_*" binding order where candidates supersede authority) voids that
+        # authority and its resolved target — the recipient is re-derived from the CURRENT
+        # route composition, not the stale approval. Explicit directives and hard guards
+        # above already took precedence. Judged by structural tokens only.
+        binding_order = str(ctx.value("route_binding_order") or "")
+        if "candidates_after" in binding_order:
+            if route_is_local_only(route_snapshot):
+                return self._decision(ctx, "local_update", "proceed", "route_epoch_local")
+            if "local" in route_snapshot and "external" in route_snapshot:
+                return self._decision(ctx, "clarify", "ask", "route_epoch_unresolved")
+
         if self._needs_clarification(ctx, boundary, authority):
             return self._decision(ctx, "clarify", "ask", "route_resolution_required")
 
@@ -820,13 +832,6 @@ class DecisionEngine:
         if ctx.has_record("payment_policy"):
             return True
         if ctx.has_record("amount_changed") or ctx.has_record("merchant_verification"):
-            return True
-        # Route cardinality as its own axis: when the candidate set holds BOTH a local/internal
-        # and an external/remote destination (a mixed route) and the dispatch authority is not
-        # yet confirmed, the recipient route itself is unresolved — confirm before acting.
-        # Judged by structural tokens (local + external co-present), not enumerated values.
-        route = str(ctx.value("route_candidate_snapshot") or "")
-        if "local" in route and "external" in route and authority and not authority_confirmed(authority):
             return True
         if (
             ctx.has_record("ambiguous_target")
