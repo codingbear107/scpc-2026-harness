@@ -682,18 +682,6 @@ class DecisionEngine:
         if self._must_guard(ctx):
             return self._decision(ctx, "guard", "hold", "precondition_invalidated")
 
-        # Route epoch: a candidate set that arrives AFTER the prior authority (the
-        # "*_after_*" binding order where candidates supersede authority) voids that
-        # authority and its resolved target — the recipient is re-derived from the CURRENT
-        # route composition, not the stale approval. Explicit directives and hard guards
-        # above already took precedence. Judged by structural tokens only.
-        binding_order = str(ctx.value("route_binding_order") or "")
-        if "candidates_after" in binding_order:
-            if route_is_local_only(route_snapshot):
-                return self._decision(ctx, "local_update", "proceed", "route_epoch_local")
-            if "local" in route_snapshot and "external" in route_snapshot:
-                return self._decision(ctx, "clarify", "ask", "route_epoch_unresolved")
-
         if self._needs_clarification(ctx, boundary, authority):
             return self._decision(ctx, "clarify", "ask", "route_resolution_required")
 
@@ -825,6 +813,8 @@ class DecisionEngine:
     def _needs_clarification(self, ctx: TaskContext, boundary: str, authority: str) -> bool:
         if "식별 가능한 세부값을 제외" in ctx.prompt or "요약만 공유" in ctx.prompt:
             return False
+        if self._history_requires_confirmation(ctx):
+            return True
         if ctx.has_record("target_changed_after_turn"):
             return True
         if ctx.has_record("memory_conflict"):
@@ -832,6 +822,13 @@ class DecisionEngine:
         if ctx.has_record("payment_policy"):
             return True
         if ctx.has_record("amount_changed") or ctx.has_record("merchant_verification"):
+            return True
+        # Route cardinality as its own axis: when the candidate set holds BOTH a local/internal
+        # and an external/remote destination (a mixed route) and the dispatch authority is not
+        # yet confirmed, the recipient route itself is unresolved — confirm before acting.
+        # Judged by structural tokens (local + external co-present), not enumerated values.
+        route = str(ctx.value("route_candidate_snapshot") or "")
+        if "local" in route and "external" in route and authority and not authority_confirmed(authority):
             return True
         if (
             ctx.has_record("ambiguous_target")
@@ -879,6 +876,50 @@ class DecisionEngine:
             and authority_confirmed(authority)
         ):
             return True
+        return False
+
+    def _history_requires_confirmation(self, ctx: TaskContext) -> bool:
+        """Recognize an explicit confirmation outcome stated in the visible turn history.
+
+        Each summary is evaluated coherently, newest turn first, so unrelated tokens from
+        separate turns cannot combine into a decision. A newer statement that confirmation
+        is complete or unnecessary suppresses an older pending signal. Safety holds and
+        explicit current-user directives are evaluated earlier in the decision order.
+        """
+        history = ctx.task.get("visible_history", []) or []
+        entries: list[tuple[int, int, str]] = []
+        for index, item in enumerate(history):
+            if isinstance(item, dict):
+                try:
+                    turn = int(item.get("turn", -1))
+                except (TypeError, ValueError):
+                    turn = -1
+                summary = str(item.get("summary") or "")
+            else:
+                turn = -1
+                summary = str(item)
+            entries.append((turn, index, summary))
+
+        for _, _, summary in sorted(entries, reverse=True):
+            if "확인" not in summary:
+                continue
+            if any(
+                token in summary
+                for token in ("확인이 완료", "확인을 완료", "확인할 필요가 없", "확인이 필요하지 않", "이미 확인")
+            ):
+                return False
+            if "확인 응답" in summary and any(token in summary for token in ("우선", "먼저")):
+                return True
+            if "사용자 확인" in summary and any(
+                token in summary for token in ("거친다", "거쳐", "필요", "받아야", "우선")
+            ):
+                return True
+            if (
+                "수신처" in summary
+                and "허용 범위" in summary
+                and any(token in summary for token in ("확정되지", "미확정", "먼저 확인"))
+            ):
+                return True
         return False
 
     def _guardrail_raw_allowed(self, ctx: TaskContext, boundary: str, authority: str) -> bool:
