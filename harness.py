@@ -825,6 +825,13 @@ class DecisionEngine:
     def _needs_clarification(self, ctx: TaskContext, boundary: str, authority: str) -> bool:
         if "식별 가능한 세부값을 제외" in ctx.prompt or "요약만 공유" in ctx.prompt:
             return False
+        # Route cardinality as its own axis: when the candidate set holds BOTH a local/internal
+        # and an external/remote destination (a mixed route) and the dispatch authority is not
+        # yet confirmed, the recipient route itself is unresolved — confirm before acting.
+        # Judged by structural tokens (local + external co-present), not enumerated values.
+        route = str(ctx.value("route_candidate_snapshot") or "")
+        if "local" in route and "external" in route and authority and not authority_confirmed(authority):
+            return True
         if ctx.has_record("target_changed_after_turn"):
             return True
         if ctx.has_record("memory_conflict"):
