@@ -830,15 +830,6 @@ class DecisionEngine:
         route = str(ctx.value("route_candidate_snapshot") or "")
         if "local" in route and "external" in route and authority and not authority_confirmed(authority):
             return True
-        # The same principle regardless of route mix: redacting content does not by itself
-        # grant an unconfirmed dispatch authority — confirm before the redacted dispatch.
-        if is_redaction_directive(boundary) and authority and not authority_confirmed(authority):
-            return True
-        # And a mixed candidate set under a redaction boundary leaves the RECIPIENT side
-        # unresolved even when authority is confirmed — the redaction constrains content,
-        # not which of the co-present local/external destinations receives it.
-        if "local" in route and "external" in route and is_redaction_directive(boundary):
-            return True
         if (
             ctx.has_record("ambiguous_target")
             and is_redaction_directive(boundary)
