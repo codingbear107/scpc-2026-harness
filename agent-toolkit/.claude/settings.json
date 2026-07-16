@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python scripts/provenance_gate.py 2>/dev/null | tail -1 | python -c \"import sys,json; line=sys.stdin.read().strip(); print(json.dumps({'systemMessage': '[gate] '+line} if line else {}))\" || true",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python scripts/provenance_gate.py >/dev/null 2>&1 || echo '[gate] new finding introduced by this edit — run: python scripts/provenance_gate.py'",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

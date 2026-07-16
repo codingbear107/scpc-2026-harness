@@ -1,0 +1,12 @@
+#!/bin/sh
+# Hard gate: block the commit if the provenance gate reports findings.
+# Install: cp agent-toolkit/githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+python scripts/provenance_gate.py
+status=$?
+if [ $status -ne 0 ]; then
+  echo ""
+  echo "commit blocked by provenance gate."
+  echo "fix the findings, or consciously add a justified entry to ALLOWLIST in scripts/provenance_gate.py"
+  exit 1
+fi
+exit 0
