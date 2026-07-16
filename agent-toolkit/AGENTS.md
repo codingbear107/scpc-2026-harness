@@ -1,5 +1,23 @@
 # Agent Operating Rules (battle-tested)
 
+## 0. Fresh-project PRD intake (MANDATORY before any coding)
+
+If `spec/SPEC.yaml` does not exist, do NOT start implementation. Run the intake flow:
+1. **Request the PRD** from the user (file path or pasted text).
+2. Read it fully; inventory requirement/constraint sentences with IDs (`PRD-<sec>.<n>`).
+3. **Interview the user on stack/tools** in ONE batched round (runtime, DB, auth, deploy,
+   integrations implied by the PRD, test/CI level) — recommend a default per item;
+   record "up to you" answers as `assumption: true`.
+4. **Force concretization of abstract sentences**: each requirement must compile to
+   `{actor, action, object, condition, acceptance_criterion}`. Sentences with missing
+   slots or vague qualifiers used without measurable criteria (빠르게/쉽게/적절히/안전하게,
+   fast/easy/robust/scalable/seamless...) are UNCONFIRMED → never guess; list them in
+   `spec/OPEN-QUESTIONS.md` with 2-4 concrete options + a recommendation, batched by topic.
+5. Write `spec/SPEC.yaml` (stack + typed requirements with source/certainty/priority),
+   get explicit user approval, then verify gate decisions (data model, auth boundary,
+   API contract, deploy target) with a walking skeleton BEFORE feature work.
+See `.claude/skills/prd-intake/SKILL.md` for the full schema.
+
 These rules come from a 9-day deterministic-harness campaign (30+ candidates, live scored
 submissions): bundled changes regressed twice unattributably; isolated hypotheses won twice;
 pre-registered kill criteria stopped a doomed rewrite before it consumed the budget; one
