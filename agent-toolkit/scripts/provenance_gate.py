@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Deterministic quality/provenance gate — stdlib only, exit 0 = clean, 1 = findings.
+"""Deterministic quality/provenance gate — stdlib only. exit 0 = clean, 1 = findings.
 
-Generalized from a competition-harness compliance gate where it replaced a 19-agent LLM
-audit with a 0-second deterministic check that caught the same defect classes on every
-build. The core idea worth stealing is the PROVENANCE LEDGER: any "magic" literal that
-drives behavior must be either derived from a declared source or CONSCIOUSLY allowlisted —
-adding to the allowlist is a reviewable act, so nothing ships by accident.
+Core idea (from a live-scored harness campaign): the PROVENANCE LEDGER — any behavior-
+driving magic literal must be derived from a declared source or CONSCIOUSLY allowlisted,
+so nothing ships by accident. Adding to ALLOWLIST is a reviewable act.
 
-Wire it three ways (all recommended together):
-  - .git/hooks/pre-commit          -> blocks the commit (hard gate)
-  - Claude Code Stop hook          -> report-only, every turn (early warning)
-  - CI step                        -> blocks the merge
+Modes:
+  python scripts/provenance_gate.py                  # scan working tree (human output)
+  python scripts/provenance_gate.py --staged         # scan STAGED contents (pre-commit)
+  python scripts/provenance_gate.py --hook stop      # Claude Code Stop hook JSON
+  python scripts/provenance_gate.py --hook posttool  # Claude Code PostToolUse hook JSON
+                                                     #  (findings -> decision:block so the
+                                                     #   agent SEES the reason and fixes it)
 
-Adapt the CONFIG block per project. Run: python scripts/provenance_gate.py [--staged]
+Matched secrets are REDACTED in all output (first 4 chars only).
+Adapt the CONFIG block per project.
 """
 from __future__ import annotations
 
+import argparse
+import json
 import re
 import subprocess
 import sys
@@ -25,78 +29,115 @@ ROOT = Path(__file__).resolve().parents[1]
 
 # ============================== CONFIG (adapt per project) ==============================
 
-# Files/dirs to scan. Globs relative to repo root.
-SCAN_GLOBS = ["src/**/*.py", "src/**/*.ts", "src/**/*.tsx", "app/**/*.py", "*.py"]
-EXCLUDE_PARTS = {".git", "node_modules", "dist", "build", ".venv", "__pycache__", "tests"}
+CODE_EXT = {".py", ".js", ".ts", ".tsx", ".jsx", ".mjs", ".go", ".rb", ".java", ".cs"}
+CONF_EXT = {".json", ".yml", ".yaml", ".toml", ".tf", ".sql", ".sh", ".ps1", ".env"}
+SCAN_EXT = CODE_EXT | CONF_EXT
+SCAN_BASENAMES = {"Dockerfile", "docker-compose.yml", "Makefile"}
+EXCLUDE_PARTS = {".git", "node_modules", "dist", "build", ".venv", "__pycache__",
+                 "vendor", "coverage"}
+EXCLUDE_NAMES = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock",
+                 "Cargo.lock"}
+EXCLUDE_SUFFIXES = (".min.js", ".map")
 
-# 1) DENYLIST — patterns that must NEVER appear in shipped source. Zero legitimate uses.
-DENYLIST: list[tuple[str, str]] = [
+# 1) DENYLIST — (pattern, why, extensions or None=all). Zero legitimate uses when it fires.
+DENYLIST: list[tuple[str, str, set[str] | None]] = [
     (r"(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*['\"][A-Za-z0-9+/_\-]{16,}['\"]",
-     "hardcoded credential-like literal"),
-    (r"(?i)sk-[A-Za-z0-9]{20,}", "provider API key pattern"),
-    (r"(?i)AKIA[0-9A-Z]{16}", "AWS access key pattern"),
-    (r"console\.log\(", "debug logging left in shipped source"),
-    (r"\bdebugger\b", "debugger statement"),
-    (r"(?i)#\s*(hack|do not ship|remove before)", "explicit do-not-ship marker"),
-    (r"(?i)localhost:\d{2,5}", "hardcoded local endpoint"),
-    (r"(?i)\.only\(", "focused test (.only) left enabled"),
+     "hardcoded credential-like literal", None),
+    (r"(?i)\bsk-[A-Za-z0-9]{20,}", "provider API key pattern", None),
+    (r"AKIA[0-9A-Z]{16}", "AWS access key pattern", None),
+    (r"-----BEGIN (RSA |EC )?PRIVATE KEY-----", "private key material", None),
+    (r"console\.log\(", "debug logging left in shipped source",
+     {".js", ".ts", ".tsx", ".jsx", ".mjs"}),
+    (r"\bdebugger\b", "debugger statement", {".js", ".ts", ".tsx", ".jsx", ".mjs"}),
+    (r"(?i)#\s*(hack|do not ship|remove before)", "explicit do-not-ship marker", None),
+    (r"(?i)\.only\(", "focused test (.only) left enabled",
+     {".js", ".ts", ".tsx", ".jsx", ".mjs"}),
 ]
 
-# 2) PROVENANCE LEDGER — behavior-driving literals must be allowlisted consciously.
-#    LITERAL_PATTERN finds suspicious literals; ALLOWLIST is the reviewable ledger.
-#    Every entry should carry a justification comment. An unexplained match FAILS the gate.
-LITERAL_PATTERN = re.compile(
-    r"['\"](https?://[^'\"]+|[0-9a-f]{24,}|[A-Z0-9_]{6,}@[a-z]+)['\"]"
-)
+# 2) PROVENANCE LEDGER — behavior-driving literals must be consciously allowlisted.
+LITERAL_PATTERN = re.compile(r"['\"](https?://[^'\"\s]{8,}|[0-9a-f]{24,})['\"]")
+LITERAL_EXTS = CODE_EXT  # config files legitimately hold URLs; code should not
 ALLOWLIST: set[str] = {
     # "https://api.stripe.com/v1",   # payment provider base URL — public, stable
 }
 
-# 3) FORBIDDEN IMPORTS — packages that must not enter shipped source (env-specific).
-FORBIDDEN_IMPORT = re.compile(
-    r"^\s*(?:import|from)\s+(pdb|ipdb|pytest(?=\s)|IPython)\b", re.MULTILINE
-)
+# 3) FORBIDDEN IMPORTS — must not enter shipped code (env/debug-only packages).
+FORBIDDEN_IMPORT = re.compile(r"^\s*(?:import|from)\s+(pdb|ipdb|IPython)\b", re.MULTILINE)
 
-# 4) TRACKED-FILE POLICY — local-only artifacts that must never be committed.
-NEVER_TRACKED = [".env", ".env.local", "*.pem", "*.key", "credentials.json"]
+# 4) NEVER-TRACKED — local-only artifacts that must never be committed.
+NEVER_TRACKED = [".env", ".env.*", "*.pem", "*.key", "credentials.json"]
 
 # ========================================================================================
 
 
-def _files() -> list[Path]:
-    out: list[Path] = []
-    for g in SCAN_GLOBS:
-        for p in ROOT.glob(g):
-            if p.is_file() and not (set(p.parts) & EXCLUDE_PARTS):
-                out.append(p)
-    return sorted(set(out))
+def _redact(s: str) -> str:
+    return s[:4] + "…(redacted)" if len(s) > 8 else "…(redacted)"
 
 
-def run() -> list[str]:
+def _scannable(rel: str) -> bool:
+    p = Path(rel)
+    if p.name == "provenance_gate.py":  # the checker itself: its config IS compliance data
+        return False
+    if set(p.parts) & EXCLUDE_PARTS or p.name in EXCLUDE_NAMES:
+        return False
+    if any(p.name.endswith(sfx) for sfx in EXCLUDE_SUFFIXES):
+        return False
+    return p.suffix in SCAN_EXT or p.name in SCAN_BASENAMES
+
+
+def _git(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+
+
+def _sources(staged: bool) -> list[tuple[str, str]]:
+    """[(relpath, content)] from staged index or working tree."""
+    out: list[tuple[str, str]] = []
+    if staged:
+        names = _git("diff", "--cached", "--name-only", "--diff-filter=ACM").stdout.split("\n")
+        for rel in filter(None, (n.strip() for n in names)):
+            if not _scannable(rel):
+                continue
+            show = _git("show", f":{rel}")
+            if show.returncode == 0:
+                out.append((rel, show.stdout))
+    else:
+        for p in ROOT.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = str(p.relative_to(ROOT)).replace("\\", "/")
+            if not _scannable(rel):
+                continue
+            try:
+                out.append((rel, p.read_text(encoding="utf-8", errors="ignore")))
+            except OSError:
+                continue
+    return out
+
+
+def run(staged: bool = False) -> list[str]:
     findings: list[str] = []
-    for p in _files():
-        rel = p.relative_to(ROOT)
-        try:
-            text = p.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
+    for rel, text in _sources(staged):
+        ext = Path(rel).suffix
         for lineno, line in enumerate(text.splitlines(), 1):
-            for pat, why in DENYLIST:
-                if re.search(pat, line):
-                    findings.append(f"[deny] {rel}:{lineno}: {why} -> {line.strip()[:70]}")
-            for m in LITERAL_PATTERN.finditer(line):
-                lit = m.group(1)
-                if lit not in ALLOWLIST:
-                    findings.append(
-                        f"[provenance] {rel}:{lineno}: literal {lit[:50]!r} not in "
-                        f"ALLOWLIST -> justify it there (with a comment) or move to config"
-                    )
-        for m in FORBIDDEN_IMPORT.finditer(text):
-            findings.append(f"[import] {rel}: forbidden import {m.group(1)!r}")
+            for pat, why, exts in DENYLIST:
+                if exts is not None and ext not in exts:
+                    continue
+                m = re.search(pat, line)
+                if m:
+                    findings.append(f"[deny] {rel}:{lineno}: {why} -> {_redact(m.group(0))}")
+            if ext in LITERAL_EXTS:
+                for m in LITERAL_PATTERN.finditer(line):
+                    lit = m.group(1)
+                    if lit not in ALLOWLIST:
+                        findings.append(
+                            f"[provenance] {rel}:{lineno}: literal {_redact(lit)!r} not in "
+                            f"ALLOWLIST -> justify it there (with a comment) or move to config"
+                        )
+        if ext in CODE_EXT:
+            for m in FORBIDDEN_IMPORT.finditer(text):
+                findings.append(f"[import] {rel}: forbidden import {m.group(1)!r}")
 
-    tracked = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True
-    ).stdout.split()
+    tracked = _git("ls-files").stdout.split()
     for pattern in NEVER_TRACKED:
         rx = re.compile("^" + pattern.replace(".", r"\.").replace("*", ".*") + "$")
         for t in tracked:
@@ -106,11 +147,29 @@ def run() -> list[str]:
 
 
 def main() -> int:
-    findings = run()
-    if not findings:
-        print("provenance gate: clean")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--staged", action="store_true", help="scan staged contents (pre-commit)")
+    ap.add_argument("--hook", choices=["stop", "posttool"], help="emit Claude Code hook JSON")
+    args = ap.parse_args()
+
+    findings = run(staged=args.staged)
+
+    if args.hook == "stop":
+        if findings:
+            msg = f"[gate] {len(findings)} finding(s) — run: python scripts/provenance_gate.py"
+            print(json.dumps({"systemMessage": msg}))
         return 0
-    print(f"provenance gate: {len(findings)} finding(s):")
+    if args.hook == "posttool":
+        if findings:
+            reason = "provenance gate findings introduced/present:\n" + "\n".join(
+                "- " + f for f in findings[:10])
+            print(json.dumps({"decision": "block", "reason": reason}))
+        return 0
+
+    if not findings:
+        print("provenance gate: clean" + (" (staged)" if args.staged else ""))
+        return 0
+    print(f"provenance gate: {len(findings)} finding(s)" + (" (staged)" if args.staged else "") + ":")
     for f in findings[:50]:
         print("  - " + f)
     return 1

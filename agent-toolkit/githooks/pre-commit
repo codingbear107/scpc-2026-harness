@@ -1,11 +1,14 @@
 #!/bin/sh
-# Hard gate: block the commit if the provenance gate reports findings.
+# Hard gate: block the commit if the provenance gate finds issues in the STAGED contents
+# (what will actually be committed — not the working tree).
 # Install: cp agent-toolkit/githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-python scripts/provenance_gate.py
+# Windows note: if `python` resolves to the Microsoft Store shim, replace with `py -3`
+# or an absolute interpreter path.
+python scripts/provenance_gate.py --staged
 status=$?
 if [ $status -ne 0 ]; then
   echo ""
-  echo "commit blocked by provenance gate."
+  echo "commit blocked by provenance gate (staged contents)."
   echo "fix the findings, or consciously add a justified entry to ALLOWLIST in scripts/provenance_gate.py"
   exit 1
 fi

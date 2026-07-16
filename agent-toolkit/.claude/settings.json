@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/provenance_gate.py 2>/dev/null | tail -1 | python -c \"import sys,json; line=sys.stdin.read().strip(); print(json.dumps({'systemMessage': '[gate] '+line} if line else {}))\" || true",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/provenance_gate.py\" --hook stop",
             "timeout": 30
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/provenance_gate.py >/dev/null 2>&1 || echo '[gate] new finding introduced by this edit — run: python scripts/provenance_gate.py'",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/provenance_gate.py\" --hook posttool",
             "timeout": 30
           }
         ]

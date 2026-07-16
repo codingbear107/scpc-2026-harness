@@ -1,9 +1,10 @@
 # Agent Operating Rules (battle-tested)
 
-These rules were validated in a month-long deterministic-harness campaign (30+ candidates,
-live scored submissions): bundled changes regressed twice unattributably; isolated
-hypotheses won twice; pre-registered kill criteria stopped a doomed rewrite; one cheap
-experiment refuted a multi-agent review's top finding. Follow them for ALL non-trivial work.
+These rules come from a 9-day deterministic-harness campaign (30+ candidates, live scored
+submissions): bundled changes regressed twice unattributably; isolated hypotheses won twice;
+pre-registered kill criteria stopped a doomed rewrite before it consumed the budget; one
+cheap experiment refuted a multi-agent review's top finding. Follow them for ALL
+non-trivial work.
 
 ## 1. Experiment discipline (before any risky/measurable change)
 
