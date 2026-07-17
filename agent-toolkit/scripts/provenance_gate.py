@@ -31,7 +31,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 CODE_EXT = {".py", ".js", ".ts", ".tsx", ".jsx", ".mjs", ".go", ".rb", ".java", ".cs"}
 CONF_EXT = {".json", ".yml", ".yaml", ".toml", ".tf", ".sql", ".sh", ".ps1", ".env"}
-SCAN_EXT = CODE_EXT | CONF_EXT
+DOC_EXT = {".md"}  # secrets pasted into docs are secrets too (DENYLIST only)
+SCAN_EXT = CODE_EXT | CONF_EXT | DOC_EXT
 SCAN_BASENAMES = {"Dockerfile", "docker-compose.yml", "Makefile"}
 EXCLUDE_PARTS = {".git", "node_modules", "dist", "build", ".venv", "__pycache__",
                  "vendor", "coverage"}
@@ -55,8 +56,16 @@ DENYLIST: list[tuple[str, str, set[str] | None]] = [
 ]
 
 # 2) PROVENANCE LEDGER — behavior-driving literals must be consciously allowlisted.
-LITERAL_PATTERN = re.compile(r"['\"](https?://[^'\"\s]{8,}|[0-9a-f]{24,})['\"]")
-LITERAL_EXTS = CODE_EXT  # config files legitimately hold URLs; code should not
+#    v0.3 (alert-fatigue fix): by default only HIGH-ENTROPY literals in ASSIGNMENT context
+#    are flagged. Quoted URLs in code are common and legitimate (fetch endpoints, configs),
+#    so URL-ledger enforcement is OPT-IN via STRICT_LITERAL_LEDGER. Comment lines are
+#    skipped for the ledger (doc links) — DENYLIST secret patterns still scan every line.
+STRICT_LITERAL_LEDGER = False
+ASSIGN_CTX = re.compile(r"[=:]\s*['\"]")
+HIGH_ENTROPY_LIT = re.compile(r"['\"]([0-9a-fA-F]{24,}|[A-Za-z0-9+/]{40,}={0,2})['\"]")
+URL_LIT = re.compile(r"['\"](https?://[^'\"\s]{8,})['\"]")
+COMMENT_LEAD = re.compile(r"^\s*(#|//|\*|<!--)")
+LITERAL_EXTS = CODE_EXT
 ALLOWLIST: set[str] = {
     # "https://api.stripe.com/v1",   # payment provider base URL — public, stable
 }
@@ -125,9 +134,11 @@ def run(staged: bool = False) -> list[str]:
                 m = re.search(pat, line)
                 if m:
                     findings.append(f"[deny] {rel}:{lineno}: {why} -> {_redact(m.group(0))}")
-            if ext in LITERAL_EXTS:
-                for m in LITERAL_PATTERN.finditer(line):
-                    lit = m.group(1)
+            if ext in LITERAL_EXTS and not COMMENT_LEAD.match(line) and ASSIGN_CTX.search(line):
+                lits = [m.group(1) for m in HIGH_ENTROPY_LIT.finditer(line)]
+                if STRICT_LITERAL_LEDGER:
+                    lits += [m.group(1) for m in URL_LIT.finditer(line)]
+                for lit in lits:
                     if lit not in ALLOWLIST:
                         findings.append(
                             f"[provenance] {rel}:{lineno}: literal {_redact(lit)!r} not in "

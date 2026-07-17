@@ -2,9 +2,18 @@
 # Hard gate: block the commit if the provenance gate finds issues in the STAGED contents
 # (what will actually be committed — not the working tree).
 # Install: cp agent-toolkit/githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
-# Windows note: if `python` resolves to the Microsoft Store shim, replace with `py -3`
-# or an absolute interpreter path.
-python scripts/provenance_gate.py --staged
+#
+# Interpreter auto-detection (v0.3): prefers the Windows py launcher, then python3, then
+# python — avoids the Microsoft Store `python` shim (exit 9009) without manual edits.
+if command -v py >/dev/null 2>&1; then
+  PY="py -3"
+elif command -v python3 >/dev/null 2>&1; then
+  PY="python3"
+else
+  PY="python"
+fi
+
+$PY scripts/provenance_gate.py --staged
 status=$?
 if [ $status -ne 0 ]; then
   echo ""

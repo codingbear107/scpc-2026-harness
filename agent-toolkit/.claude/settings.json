@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/provenance_gate.py\" --hook stop",
+            "command": "PY=python; command -v py >/dev/null 2>&1 && PY='py -3'; command -v python3 >/dev/null 2>&1 && PY=python3; $PY \"$CLAUDE_PROJECT_DIR/scripts/provenance_gate.py\" --hook stop",
             "timeout": 30
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/provenance_gate.py\" --hook posttool",
+            "command": "PY=python; command -v py >/dev/null 2>&1 && PY='py -3'; command -v python3 >/dev/null 2>&1 && PY=python3; $PY \"$CLAUDE_PROJECT_DIR/scripts/provenance_gate.py\" --hook posttool",
             "timeout": 30
           }
         ]
